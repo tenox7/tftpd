@@ -39,7 +39,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	flag.StringVar(&rootDir, "root", "", "Root directory for TFTP files (mandatory)")
-	flag.StringVar(&portRange, "ports", "50000-55000", "Port range for dynamic connections (e.g., '50000-60000')")
+	flag.StringVar(&portRange, "ports", "50000-60000", "Port range for dynamic connections (e.g., '50000-60000')")
 	flag.Parse()
 
 	if rootDir == "" {
@@ -152,7 +152,7 @@ func handleReadRequest(request []byte, remoteAddr *net.UDPAddr) {
 		}
 
 		sendData(conn, blockNum, buffer[:n])
-		log.Printf("Sent block %d (%d bytes) to %s", blockNum, n, conn.RemoteAddr())
+		//log.Printf("Sent block %d (%d bytes) to %s", blockNum, n, conn.RemoteAddr())
 
 		totalBytesSent += n
 
@@ -225,7 +225,7 @@ func handleWriteRequest(request []byte, remoteAddr *net.UDPAddr) {
 		blockNum = uint16(buffer[2])<<8 | uint16(buffer[3])
 		data := buffer[4:n]
 
-		log.Printf("Received block %d (%d bytes) from %s", blockNum, len(data), conn.RemoteAddr())
+		//log.Printf("Received block %d (%d bytes) from %s", blockNum, len(data), conn.RemoteAddr())
 
 		_, err = file.Write(data)
 		if err != nil {
@@ -288,6 +288,7 @@ func sendData(conn *net.UDPConn, blockNum uint16, data []byte) {
 	_, err := conn.Write(packet)
 	if err != nil {
 		log.Printf("Error sending DATA packet: %v", err)
+		return
 	}
 }
 
@@ -296,8 +297,7 @@ func sendAck(conn *net.UDPConn, blockNum uint16) {
 	_, err := conn.Write(packet)
 	if err != nil {
 		log.Printf("Error sending ACK packet: %v", err)
-	} else {
-		log.Printf("Sent ACK for block %d to %s", blockNum, conn.RemoteAddr())
+		return
 	}
 }
 
@@ -351,7 +351,7 @@ func getConnectionInRange(remoteAddr *net.UDPAddr) (*net.UDPConn, error) {
 		}
 		conn, err := net.DialUDP("udp", localAddr, remoteAddr)
 		if err == nil {
-			log.Printf("Established connection from %s to %s", conn.LocalAddr(), conn.RemoteAddr())
+			log.Printf("Established outgoing connection from local:%s to remote:%s", conn.LocalAddr(), conn.RemoteAddr())
 			return conn, nil
 		}
 	}
