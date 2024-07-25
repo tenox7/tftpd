@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,17 +28,30 @@ const (
 	opERR  opcode = 5 // Error
 )
 
-var rootDir string
+var (
+	rootDir   string
+	portRange string
+	minPort   int
+	maxPort   int
+)
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	flag.StringVar(&rootDir, "root", "", "Root directory for TFTP files (mandatory)")
+	flag.StringVar(&portRange, "ports", "50000-55000", "Port range for dynamic connections (e.g., '50000-60000')")
 	flag.Parse()
 
 	if rootDir == "" {
 		log.Fatal("Error: Root directory must be specified using the -root flag")
 	}
+
+	var err error
+	minPort, maxPort, err = parsePortRange(portRange)
+	if err != nil {
+		log.Fatalf("Error parsing port range: %v", err)
+	}
+	log.Printf("Using port range for dynamic connections: %d - %d", minPort, maxPort)
 
 	absRootDir, err := filepath.Abs(rootDir)
 	if err != nil {
@@ -118,14 +132,12 @@ func handleReadRequest(request []byte, remoteAddr *net.UDPAddr) {
 	}
 	defer file.Close()
 
-	conn, err := net.DialUDP("udp", nil, remoteAddr)
+	conn, err := getConnectionInRange(remoteAddr)
 	if err != nil {
 		log.Printf("Error creating UDP connection: %v", err)
 		return
 	}
 	defer conn.Close()
-
-	log.Printf("Established connection from %s to %s", conn.LocalAddr(), conn.RemoteAddr())
 
 	buffer := make([]byte, 512)
 	blockNum := uint16(1)
@@ -140,7 +152,7 @@ func handleReadRequest(request []byte, remoteAddr *net.UDPAddr) {
 		}
 
 		sendData(conn, blockNum, buffer[:n])
-		log.Printf("Sent block %d (%d bytes) to %s", blockNum, n, remoteAddr)
+		log.Printf("Sent block %d (%d bytes) to %s", blockNum, n, conn.RemoteAddr())
 
 		totalBytesSent += n
 
@@ -183,14 +195,12 @@ func handleWriteRequest(request []byte, remoteAddr *net.UDPAddr) {
 	}
 	defer file.Close()
 
-	conn, err := net.DialUDP("udp", nil, remoteAddr)
+	conn, err := getConnectionInRange(remoteAddr)
 	if err != nil {
 		log.Printf("Error creating UDP connection: %v", err)
 		return
 	}
 	defer conn.Close()
-
-	log.Printf("Established connection from %s to %s", conn.LocalAddr(), conn.RemoteAddr())
 
 	blockNum := uint16(0)
 	sendAck(conn, blockNum)
@@ -215,7 +225,7 @@ func handleWriteRequest(request []byte, remoteAddr *net.UDPAddr) {
 		blockNum = uint16(buffer[2])<<8 | uint16(buffer[3])
 		data := buffer[4:n]
 
-		log.Printf("Received block %d (%d bytes) from %s", blockNum, len(data), remoteAddr)
+		log.Printf("Received block %d (%d bytes) from %s", blockNum, len(data), conn.RemoteAddr())
 
 		_, err = file.Write(data)
 		if err != nil {
@@ -292,7 +302,7 @@ func sendAck(conn *net.UDPConn, blockNum uint16) {
 }
 
 func sendError(addr *net.UDPAddr, errorCode uint16, errorMsg string) {
-	conn, err := net.DialUDP("udp", nil, addr)
+	conn, err := getConnectionInRange(addr)
 	if err != nil {
 		log.Printf("Error creating UDP connection for error message: %v", err)
 		return
@@ -311,7 +321,7 @@ func sendError(addr *net.UDPAddr, errorCode uint16, errorMsg string) {
 	if err != nil {
 		log.Printf("Error sending ERROR packet: %v", err)
 	} else {
-		log.Printf("Sent ERROR (code: %d, message: %s) to %s", errorCode, errorMsg, addr)
+		log.Printf("Sent ERROR (code: %d, message: %s) to %s", errorCode, errorMsg, conn.RemoteAddr())
 	}
 }
 
@@ -331,4 +341,46 @@ func waitForAck(conn *net.UDPConn, expectedBlock uint16) error {
 		return fmt.Errorf("unexpected ACK: opcode=%d, block=%d", opcode, blockNum)
 	}
 	return nil
+}
+
+func getConnectionInRange(remoteAddr *net.UDPAddr) (*net.UDPConn, error) {
+	for port := minPort; port <= maxPort; port++ {
+		localAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			continue
+		}
+		conn, err := net.DialUDP("udp", localAddr, remoteAddr)
+		if err == nil {
+			log.Printf("Established connection from %s to %s", conn.LocalAddr(), conn.RemoteAddr())
+			return conn, nil
+		}
+	}
+	return nil, fmt.Errorf("no available ports in the specified range")
+}
+
+func parsePortRange(rangeStr string) (int, int, error) {
+	parts := strings.Split(rangeStr, "-")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid port range format, expected 'min-max'")
+	}
+
+	min, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid minimum port: %v", err)
+	}
+
+	max, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid maximum port: %v", err)
+	}
+
+	if min >= max {
+		return 0, 0, fmt.Errorf("minimum port must be less than maximum port")
+	}
+
+	if min < 1024 || max > 65535 {
+		return 0, 0, fmt.Errorf("ports must be between 1024 and 65535")
+	}
+
+	return min, max, nil
 }
