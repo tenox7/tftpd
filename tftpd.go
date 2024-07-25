@@ -38,7 +38,7 @@ var (
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	flag.StringVar(&rootDir, "root", "", "Root directory for TFTP files (mandatory)")
+	flag.StringVar(&rootDir, "root_dir", "", "Root directory for TFTP files (mandatory)")
 	flag.StringVar(&portRange, "ports", "50000-60000", "Port range for dynamic connections (e.g., '50000-60000')")
 	flag.Parse()
 
